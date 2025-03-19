@@ -119,24 +119,37 @@ private:
 
     Token readIdentifierOrKeyword() {
         std::string tokenStr;
-        while (pos < source.length() && (std::isalpha(source[pos]) || std::isdigit(source[pos]))) {
+        // size_t startPos = pos;
+
+        // 读取直到遇到空白或分隔符
+        while (pos < source.length() && !std::isspace(source[pos]) && !isDelimiter(source[pos])) {
             tokenStr += source[pos];
             pos++;
         }
+
         std::string lowerToken = toLower(tokenStr);
-        if (lowerToken == "var") {
-            if (pos < source.length() && !std::isspace(source[pos]) && source[pos] != ';' && source[pos] != ':') {
-                return {ERROR, tokenStr}; // 'var' must be followed by a space or delimiter
-            }
-            return {KEYWORD_VAR, tokenStr};
-        }
+
+        // 检查是否为关键字
         if (keywords.count(lowerToken)) {
             return {getKeywordType(lowerToken), tokenStr};
         }
+
+        // 验证标识符合法性：必须以字母开头，之后只允许字母和数字
         if (!std::isalpha(tokenStr[0])) {
-            return {ERROR, tokenStr}; // Identifiers must start with a letter
+            return {ERROR, tokenStr}; // 以数字或其他字符开头
         }
+        for (char c : tokenStr) {
+            if (!std::isalnum(c)) {
+                return {ERROR, tokenStr}; // 包含非法字符
+            }
+        }
+
         return {IDENTIFIER, tokenStr};
+    }
+
+    bool isDelimiter(char c) {
+        return c == ';' || c == ':' || c == ',' || c == '(' || c == ')' || c == '+' || c == '-' ||
+               c == '*' || c == '/' || c == '<' || c == '>' || c == '=';
     }
 
     Token readNumber() {
@@ -202,7 +215,6 @@ private:
         }
         tokenPos++; // Skip 'var'
 
-        // Check for space after 'var' in source (already handled in tokenizer)
         parseDefinitionBody();
         if (errors.empty() && (tokenPos >= tokens.size() || tokens[tokenPos].type != KEYWORD_BEGIN)) {
             errors.push_back("Missing 'begin' after definition body");
@@ -219,9 +231,9 @@ private:
     void parseDefinitionBody() {
         while (tokenPos < tokens.size() && tokens[tokenPos].type != KEYWORD_BEGIN) {
             if (tokens[tokenPos].type == ERROR) {
-                errors.push_back("Invalid token in definition: " + tokens[tokenPos].value);
+                errors.push_back("Invalid identifier: " + tokens[tokenPos].value);
                 tokenPos++;
-                return; // Stop parsing definition body on error
+                return; // 停止解析定义体
             }
             if (tokens[tokenPos].type != IDENTIFIER) {
                 errors.push_back("Expected identifier, found: " + tokens[tokenPos].value);
@@ -236,6 +248,11 @@ private:
                 tokenPos++;
                 if (tokenPos >= tokens.size() || tokens[tokenPos].type != IDENTIFIER) {
                     errors.push_back("Expected identifier after comma");
+                    return;
+                }
+                if (tokens[tokenPos].type == ERROR) {
+                    errors.push_back("Invalid identifier: " + tokens[tokenPos].value);
+                    tokenPos++;
                     return;
                 }
                 vars.push_back(tokens[tokenPos].value);
