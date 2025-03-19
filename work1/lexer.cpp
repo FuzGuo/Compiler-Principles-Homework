@@ -48,7 +48,7 @@ struct Token {
 
 class Analyzer {
 public:
-    Analyzer(const std::string& src) : source(src), pos(0) {
+    Analyzer(const std::string& src) : source(src), pos(0), tokenPos(0) {
         keywords = {"var", "integer", "longint", "bool", "if", "then", "else",
                     "while", "do", "for", "begin", "end", "and", "or"};
         types = {"integer", "longint", "bool"};
@@ -58,9 +58,9 @@ public:
         tokens = tokenize();
         if (tokens.empty()) {
             errors.push_back("Empty program");
-            return;
+        } else {
+            parse();
         }
-        parse();
         reportErrors();
     }
 
@@ -107,7 +107,7 @@ private:
             if (std::isspace(c)) {
                 pos++;
             } else if (std::isalpha(c)) {
-                tokens.push_back(readIdentifier());
+                tokens.push_back(readIdentifierOrKeyword());
             } else if (std::isdigit(c)) {
                 tokens.push_back(readNumber());
             } else {
@@ -117,13 +117,19 @@ private:
         return tokens;
     }
 
-    Token readIdentifier() {
+    Token readIdentifierOrKeyword() {
         std::string tokenStr;
         while (pos < source.length() && (std::isalpha(source[pos]) || std::isdigit(source[pos]))) {
             tokenStr += source[pos];
             pos++;
         }
         std::string lowerToken = toLower(tokenStr);
+        if (lowerToken == "var") {
+            if (pos < source.length() && !std::isspace(source[pos]) && source[pos] != ';' && source[pos] != ':') {
+                return {ERROR, tokenStr}; // 'var' must be followed by a space or delimiter
+            }
+            return {KEYWORD_VAR, tokenStr};
+        }
         if (keywords.count(lowerToken)) {
             return {getKeywordType(lowerToken), tokenStr};
         }
@@ -182,7 +188,7 @@ private:
                 return {OPERATOR_EQ, "=="};
             }
             pos++;
-            return {ERROR, "="};
+            return {ERROR, "="}; // Standalone '=' is invalid
         }
         std::string invalid(1, c);
         pos++;
@@ -190,27 +196,22 @@ private:
     }
 
     void parse() {
-        tokenPos = 0;
         if (tokenPos >= tokens.size() || tokens[tokenPos].type != KEYWORD_VAR) {
             errors.push_back("Program must start with 'var'");
             return;
         }
         tokenPos++; // Skip 'var'
 
-        // Check for space after 'var' by examining raw source (simplified check)
-        size_t varPos = source.find("var");
-        if (varPos != std::string::npos && (varPos + 3 >= source.length() || !std::isspace(source[varPos + 3]))) {
-            errors.push_back("Missing space after 'var'");
-        }
-
+        // Check for space after 'var' in source (already handled in tokenizer)
         parseDefinitionBody();
-        if (tokenPos >= tokens.size() || tokens[tokenPos].type != KEYWORD_BEGIN) {
+        if (errors.empty() && (tokenPos >= tokens.size() || tokens[tokenPos].type != KEYWORD_BEGIN)) {
             errors.push_back("Missing 'begin' after definition body");
             return;
         }
+        if (!errors.empty()) return; // Stop if definition body has errors
         tokenPos++; // Skip 'begin'
         parseRealizationBody();
-        if (tokenPos >= tokens.size() || tokens[tokenPos].type != KEYWORD_END) {
+        if (errors.empty() && (tokenPos >= tokens.size() || tokens[tokenPos].type != KEYWORD_END)) {
             errors.push_back("Missing 'end' at program termination");
         }
     }
@@ -220,17 +221,16 @@ private:
             if (tokens[tokenPos].type == ERROR) {
                 errors.push_back("Invalid token in definition: " + tokens[tokenPos].value);
                 tokenPos++;
-                continue;
+                return; // Stop parsing definition body on error
             }
             if (tokens[tokenPos].type != IDENTIFIER) {
                 errors.push_back("Expected identifier, found: " + tokens[tokenPos].value);
                 tokenPos++;
-                continue;
+                return;
             }
             std::string varName = tokens[tokenPos].value;
             tokenPos++;
 
-            // Collect comma-separated variables
             std::vector<std::string> vars = {varName};
             while (tokenPos < tokens.size() && tokens[tokenPos].type == DELIMITER_COMMA) {
                 tokenPos++;
@@ -240,6 +240,10 @@ private:
                 }
                 vars.push_back(tokens[tokenPos].value);
                 tokenPos++;
+            }
+            if (tokenPos < tokens.size() && tokens[tokenPos].type == IDENTIFIER) {
+                errors.push_back("Missing comma between identifiers");
+                return;
             }
 
             if (tokenPos >= tokens.size() || tokens[tokenPos].type != DELIMITER_COLON) {
@@ -256,13 +260,12 @@ private:
             std::string varType = toLower(tokens[tokenPos].value);
             tokenPos++;
 
-            // Register variables in symbol table
             for (const auto& var : vars) {
                 if (symbolTable.count(var)) {
                     errors.push_back("Repeated definition of variable: " + var);
-                } else {
-                    symbolTable[var] = varType;
+                    return;
                 }
+                symbolTable[var] = varType;
             }
 
             if (tokenPos >= tokens.size() || tokens[tokenPos].type != DELIMITER_SEMICOLON) {
@@ -278,16 +281,17 @@ private:
             if (tokens[tokenPos].type == ERROR) {
                 errors.push_back("Invalid token in realization: " + tokens[tokenPos].value);
                 tokenPos++;
-                continue;
+                return;
             }
             if (tokens[tokenPos].type != IDENTIFIER) {
                 errors.push_back("Expected identifier in statement, found: " + tokens[tokenPos].value);
                 tokenPos++;
-                continue;
+                return;
             }
             std::string varName = tokens[tokenPos].value;
             if (!symbolTable.count(varName)) {
                 errors.push_back("Undefined variable: " + varName);
+                return;
             }
             tokenPos++;
 
@@ -304,6 +308,7 @@ private:
             }
             if (tokens[tokenPos].type == IDENTIFIER && !symbolTable.count(tokens[tokenPos].value)) {
                 errors.push_back("Undefined variable in assignment: " + tokens[tokenPos].value);
+                return;
             }
             tokenPos++;
 
