@@ -208,7 +208,7 @@ private:
 
     void parse() {
         if (tokenPos >= tokens.size() || tokens[tokenPos].type != KEYWORD_VAR) {
-            errors.push_back("程序必须以 'var' 开始");
+            errors.push_back("程序起始缺少合法的 'var'");
             return;
         }
         tokenPos++; // 跳过 'var'
